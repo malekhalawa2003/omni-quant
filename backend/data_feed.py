@@ -7,7 +7,8 @@ import websockets
 
 from .shared_state import Candle, state
 
-_OKX_WS = "wss://ws.okx.com:8443/ws/v5/public"
+_WS_PUBLIC   = "wss://ws.okx.com:8443/ws/v5/public"
+_WS_BUSINESS = "wss://ws.okx.com:8443/ws/v5/business"
 
 _TF_MAP = {
     "1m":  "candle1m",
@@ -64,38 +65,30 @@ class OKXDataFeed:
             inst_id = state.symbol
             tf_key  = _TF_MAP.get(state.timeframe, "candle1m")
 
-            sub = json.dumps({
+            sub_public = json.dumps({
                 "op": "subscribe",
                 "args": [
-                    {"channel": tf_key,    "instId": inst_id},
                     {"channel": "tickers", "instId": inst_id},
                     {"channel": "books5",  "instId": inst_id},
                 ],
             })
+            sub_business = json.dumps({
+                "op": "subscribe",
+                "args": [
+                    {"channel": tf_key, "instId": inst_id},
+                ],
+            })
 
             try:
-                async with websockets.connect(
-                    _OKX_WS, ping_interval=None, close_timeout=5
-                ) as ws:
-                    await ws.send(sub)
-                    with state.acquire():
-                        state.connected = True
-                    state.add_log("INFO", f"OKX connected: {inst_id} {state.timeframe}")
-                    self._backoff = 3
-                    last_ping = time.time()
+                with state.acquire():
+                    state.connected = True
+                state.add_log("INFO", f"OKX connected: {inst_id} {state.timeframe}")
+                self._backoff = 3
 
-                    async for raw in ws:
-                        if not self._running:
-                            break
-                        if raw == "pong":
-                            continue
-                        if time.time() - last_ping > 25:
-                            await ws.send("ping")
-                            last_ping = time.time()
-                        try:
-                            self._process(json.loads(raw))
-                        except Exception:
-                            pass
+                await asyncio.gather(
+                    self._stream(_WS_PUBLIC,   sub_public),
+                    self._stream(_WS_BUSINESS, sub_business),
+                )
 
             except Exception as exc:
                 with state.acquire():
@@ -106,6 +99,23 @@ class OKXDataFeed:
                 )
                 await asyncio.sleep(self._backoff)
                 self._backoff = min(self._backoff * 2, 30)
+
+    async def _stream(self, url: str, sub: str):
+        async with websockets.connect(url, ping_interval=None, close_timeout=5) as ws:
+            await ws.send(sub)
+            last_ping = time.time()
+            async for raw in ws:
+                if not self._running:
+                    return
+                if raw == "pong":
+                    continue
+                if time.time() - last_ping > 25:
+                    await ws.send("ping")
+                    last_ping = time.time()
+                try:
+                    self._process(json.loads(raw))
+                except Exception:
+                    pass
 
     def _process(self, msg: dict):
         if "event" in msg:
