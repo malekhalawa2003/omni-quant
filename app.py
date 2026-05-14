@@ -737,6 +737,22 @@ def render_sidebar():
                 exchange.disconnect()
                 with state.acquire():
                     state.live_trading = False
+            # Paper balance display
+            eq = state.current_equity
+            dpnl = state.daily_pnl
+            dpnl_col = "#3fb950" if dpnl >= 0 else "#f85149"
+            dpnl_sgn = "+" if dpnl >= 0 else ""
+            st.markdown(
+                f'<div style="background:#0d1421;border:1px solid #1a3a5c;border-radius:8px;'
+                f'padding:.5rem .75rem;margin-top:.3rem;">'
+                f'<div style="color:#4a5568;font-size:.58rem;letter-spacing:.12em;font-weight:700;">PAPER BALANCE</div>'
+                f'<div style="font-family:\'JetBrains Mono\',monospace;font-size:1.15rem;font-weight:700;'
+                f'color:#58a6ff;margin-top:.1rem;">${eq:,.2f} <span style="font-size:.7rem;color:#4a5568;">USDT</span></div>'
+                f'<div style="font-family:\'JetBrains Mono\',monospace;font-size:.75rem;'
+                f'color:{dpnl_col};margin-top:.15rem;">{dpnl_sgn}${dpnl:,.2f} today</div>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
 
         st.divider()
 
@@ -891,14 +907,22 @@ if True:
         c1,c2,c3,c4,c5,c6 = st.columns(6)
         pct_up  = chg_pct >= 0
         acc_col = "#3fb950" if pct_up else "#f85149"
+        with state.acquire():
+            _eq    = state.current_equity
+            _dpnl  = state.daily_pnl
+            _live  = state.live_trading
+        _bal_label = "Balance" if _live else "Demo Balance"
+        _bal_delta = f"{'+' if _dpnl >= 0 else ''}{_dpnl:,.2f} today"
         cards   = [
             (c1, metric_card("Last Price", f"${price:,.2f}",
                               f"{chg_pct:+.2f}%", pct_up, acc_col)),
-            (c2, metric_card("Bid",  f"${bid:,.4f}",  accent="#089981")),
-            (c3, metric_card("Ask",  f"${ask:,.4f}",  accent="#f23645")),
+            (c2, metric_card(_bal_label, f"${_eq:,.2f}",
+                              _bal_delta, _dpnl >= 0, "#58a6ff")),
+            (c3, metric_card("Bid / Ask",
+                              f"${bid:,.2f}", f"ask ${ask:,.2f}", accent="#089981")),
             (c4, metric_card("24h High",  f"${h24:,.2f}", accent="#d29922")),
             (c5, metric_card("24h Low",   f"${l24:,.2f}", accent="#4a5568")),
-            (c6, metric_card("24h Volume", f"{vol24:,.0f}", accent="#58a6ff")),
+            (c6, metric_card("24h Volume", f"{vol24:,.0f}", accent="#30363d")),
         ]
         for col, html in cards:
             with col:
