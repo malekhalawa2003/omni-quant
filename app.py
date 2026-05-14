@@ -710,13 +710,16 @@ def render_sidebar():
                     st.session_state.api_key  = api_key
                     st.session_state.api_sec  = api_sec
                     st.session_state.api_pass = api_pass
-                    ok = exchange.connect(api_key, api_sec, api_pass, testnet)
-                    if ok:
-                        with state.acquire():
-                            state.live_trading = True
-                        st.rerun()
-                    else:
-                        st.error(exchange.error or "Failed")
+                    try:
+                        ok = exchange.connect(api_key, api_sec, api_pass, testnet)
+                        if ok:
+                            with state.acquire():
+                                state.live_trading = True
+                            st.rerun()
+                        else:
+                            st.error(exchange.error or "Connection failed")
+                    except Exception as e:
+                        st.error(f"{type(e).__name__}: {e}")
             with c2:
                 if st.button("Disconnect", use_container_width=True):
                     exchange.disconnect()
