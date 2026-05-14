@@ -1,4 +1,3 @@
-import json
 import time
 from datetime import datetime
 
@@ -6,7 +5,7 @@ import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
-import streamlit.components.v1 as components
+from plotly.subplots import make_subplots
 
 from backend.auto_trader import auto_trader
 from backend.data_feed import feed
@@ -549,79 +548,70 @@ def log_row(e: dict) -> str:
 
 _BG   = "#0d1117"
 _GRID = "#161d27"
+_UP   = "#089981"
+_DN   = "#f23645"
 
 
-def render_tv_chart(candles, symbol, timeframe, entry_price=None, entry_side=None):
-    height = 440
+def build_chart(candles, entry_price=None, entry_side=None) -> go.Figure:
     if not candles:
-        components.html(
-            f'<div style="height:{height}px;display:flex;align-items:center;'
-            f'justify-content:center;background:#0d1117;border-radius:10px;'
-            f'border:1px solid #161d27;">'
-            f'<div style="color:#30363d;font-size:14px;font-family:\'JetBrains Mono\',monospace;">'
-            f'Connecting to OKX...</div></div>',
-            height=height + 10, scrolling=False,
+        fig = go.Figure()
+        fig.add_annotation(
+            text="Connecting to OKX…",
+            xref="paper", yref="paper", x=0.5, y=0.5,
+            showarrow=False,
+            font=dict(color="#30363d", size=15, family="JetBrains Mono"),
         )
-        return
+        fig.update_layout(paper_bgcolor=_BG, plot_bgcolor=_BG,
+                          height=430, margin=dict(l=0, r=50, t=0, b=0))
+        return fig
 
-    ohlcv_json = json.dumps([
-        {"time": c.time, "open": c.open, "high": c.high, "low": c.low, "close": c.close}
-        for c in candles
-    ])
-    vol_json = json.dumps([
-        {"time": c.time, "value": c.volume,
-         "color": "#089981" if c.close >= c.open else "#f23645"}
-        for c in candles
-    ])
+    df = pd.DataFrame([{
+        "t": pd.Timestamp(c.time, unit="s", tz="UTC"),
+        "o": c.open, "h": c.high, "l": c.low, "c": c.close, "v": c.volume,
+    } for c in candles])
 
-    entry_js = ""
-    if entry_price and entry_price > 0 and entry_side:
-        entry_js = (
-            f"candleSeries.createPriceLine({{"
-            f"price:{entry_price},color:'#d29922',lineWidth:1,lineStyle:1,"
-            f"axisLabelVisible:true,title:'Entry ${entry_price:,.2f}'"
-            f"}});"
-        )
+    bar_colors = [_UP if r.c >= r.o else _DN for _, r in df.iterrows()]
 
-    html = f"""<!DOCTYPE html><html><head>
-<script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
-<style>
-  html,body{{margin:0;padding:0;background:#0d1117;overflow:hidden;}}
-  #c{{position:absolute;top:0;left:0;right:0;bottom:0;}}
-</style>
-</head><body><div id="c"></div><script>
-const el=document.getElementById('c');
-const chart=LightweightCharts.createChart(el,{{
-  autoSize:true,
-  height:{height},
-  layout:{{background:{{type:'solid',color:'#0d1117'}},textColor:'#4a5568',
-           fontFamily:'JetBrains Mono,monospace',fontSize:10}},
-  grid:{{vertLines:{{color:'#161d27'}},horzLines:{{color:'#161d27'}}}},
-  crosshair:{{mode:LightweightCharts.CrosshairMode.Normal,
-    vertLine:{{color:'#30363d',width:1,style:1}},
-    horzLine:{{color:'#30363d',width:1,style:1}}}},
-  rightPriceScale:{{borderColor:'#161d27',textColor:'#30363d'}},
-  timeScale:{{borderColor:'#161d27',timeVisible:true,secondsVisible:false}},
-  watermark:{{visible:true,fontSize:13,horzAlign:'left',vertAlign:'top',
-              color:'rgba(255,255,255,0.04)',text:'{symbol} · {timeframe}'}},
-}});
-const candleSeries=chart.addCandlestickSeries({{
-  upColor:'#089981',downColor:'#f23645',
-  borderUpColor:'#089981',borderDownColor:'#f23645',
-  wickUpColor:'#089981',wickDownColor:'#f23645',
-}});
-const volSeries=chart.addHistogramSeries({{
-  priceFormat:{{type:'volume'}},priceScaleId:'vol',
-  scaleMargins:{{top:0.8,bottom:0}},
-}});
-chart.priceScale('vol').applyOptions({{scaleMargins:{{top:0.8,bottom:0}}}});
-candleSeries.setData({ohlcv_json});
-volSeries.setData({vol_json});
-{entry_js}
-chart.timeScale().fitContent();
-</script></body></html>"""
+    fig = make_subplots(rows=2, cols=1, shared_xaxes=True,
+                        vertical_spacing=0.015, row_heights=[0.72, 0.28])
 
-    components.html(html, height=height + 10, scrolling=False)
+    fig.add_trace(go.Candlestick(
+        x=df["t"], open=df["o"], high=df["h"], low=df["l"], close=df["c"],
+        increasing=dict(line_color=_UP, fillcolor=_UP),
+        decreasing=dict(line_color=_DN, fillcolor=_DN),
+        line_width=1, name=state.symbol,
+    ), row=1, col=1)
+
+    fig.add_trace(go.Bar(
+        x=df["t"], y=df["v"],
+        marker_color=bar_colors, marker_opacity=0.5, name="Vol",
+    ), row=2, col=1)
+
+    if entry_price and entry_price > 0:
+        fig.add_hline(y=entry_price, row=1, col=1,
+                      line=dict(color="#d29922", dash="dot", width=1.5),
+                      annotation_text=f"  Entry ${entry_price:,.2f}",
+                      annotation_font=dict(color="#d29922", size=11,
+                                           family="JetBrains Mono"),
+                      annotation_position="right")
+
+    ax = dict(gridcolor=_GRID, gridwidth=1, showgrid=True, zeroline=False,
+              showline=False,
+              tickfont=dict(color="#30363d", size=10, family="JetBrains Mono"))
+    fig.update_layout(
+        paper_bgcolor=_BG, plot_bgcolor=_BG,
+        font=dict(family="Inter", color="#8b949e"),
+        xaxis_rangeslider_visible=False,
+        height=430, margin=dict(l=0, r=60, t=8, b=0),
+        showlegend=False,
+        yaxis={**ax, "side": "right", "tickformat": ",.2f"},
+        yaxis2={**ax, "side": "right", "tickformat": ",.0f"},
+        xaxis=ax, xaxis2=ax,
+        hovermode="x unified",
+        hoverlabel=dict(bgcolor="#161d27", bordercolor="#21262d",
+                        font=dict(family="JetBrains Mono", size=11)),
+    )
+    return fig
 
 
 def build_depth_chart(bids, asks) -> go.Figure | None:
@@ -932,7 +922,16 @@ if True:
             with col:
                 st.markdown(html, unsafe_allow_html=True)
 
-        st.markdown("<div style='margin-top:.4rem;'></div>", unsafe_allow_html=True)
+        _n_candles = len(state.get_candles())
+        _candle_status = (
+            f"<span style='color:#3fb950;font-size:.7rem;font-family:\"JetBrains Mono\",mono;'>"
+            f"{_n_candles} candles loaded</span>"
+            if _n_candles >= 20 else
+            f"<span style='color:#d29922;font-size:.7rem;font-family:\"JetBrains Mono\",mono;'>"
+            f"Loading candles… {_n_candles}/20 needed for signals</span>"
+        )
+        st.markdown(f"<div style='margin-top:.4rem;margin-bottom:.2rem;'>{_candle_status}</div>",
+                    unsafe_allow_html=True)
 
         # ── Row 2: Chart + Signals ────────────────────────────────────────
         chart_col, sig_col = st.columns([3, 1], gap="small")
@@ -940,12 +939,15 @@ if True:
         with chart_col:
             with state.acquire():
                 _pos_snap = dict(state.position)
-            render_tv_chart(
-                state.get_candles(200),
-                state.symbol,
-                state.timeframe,
-                _pos_snap["entry_price"] if _pos_snap["side"] else None,
-                _pos_snap["side"],
+            st.plotly_chart(
+                build_chart(
+                    state.get_candles(200),
+                    _pos_snap["entry_price"] if _pos_snap["side"] else None,
+                    _pos_snap["side"],
+                ),
+                use_container_width=True,
+                config={"displayModeBar": False},
+                key="candle_chart",
             )
 
         with sig_col:
