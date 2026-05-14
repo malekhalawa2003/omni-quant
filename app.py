@@ -825,11 +825,8 @@ def render_sidebar():
 render_sidebar()
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Header placeholder (rendered each tick)
+# Header
 # ══════════════════════════════════════════════════════════════════════════════
-header_ph = st.empty()
-
-
 def render_header(price, chg_pct, connected, trading_active, live_trading, auto_trade):
     dot   = '<span class="dot-live"></span>' if connected else '<span class="dot-dead"></span>'
     conn  = "LIVE DATA" if connected else "DISCONNECTED"
@@ -848,7 +845,7 @@ def render_header(price, chg_pct, connected, trading_active, live_trading, auto_
     pnl_sym = "▲" if chg_pct >= 0 else "▼"
     now     = datetime.now().strftime("%H:%M:%S")
 
-    header_ph.markdown(f"""
+    st.markdown(f"""
     <div style="display:flex;align-items:center;justify-content:space-between;
          padding:.3rem 0 .55rem;border-bottom:1px solid #161d27;margin-bottom:.5rem;">
       <div style="display:flex;align-items:center;gap:.7rem;">
@@ -871,25 +868,22 @@ def render_header(price, chg_pct, connected, trading_active, live_trading, auto_
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Main loop
+# Dashboard — renders once per rerun cycle
 # ══════════════════════════════════════════════════════════════════════════════
-main_ph = st.empty()
+ticker  = state.ticker.copy()
+price   = ticker["price"]
+bid     = ticker["bid"]
+ask     = ticker["ask"]
+spread  = ask - bid
+h24     = ticker["high_24h"]
+l24     = ticker["low_24h"]
+vol24   = ticker["volume_24h"]
+chg_pct = ticker["price_change_pct"]
 
-while True:
-    ticker  = state.ticker.copy()
-    price   = ticker["price"]
-    bid     = ticker["bid"]
-    ask     = ticker["ask"]
-    spread  = ask - bid
-    h24     = ticker["high_24h"]
-    l24     = ticker["low_24h"]
-    vol24   = ticker["volume_24h"]
-    chg_pct = ticker["price_change_pct"]
+render_header(price, chg_pct, state.connected, state.trading_active,
+              state.live_trading, state.auto_trade)
 
-    render_header(price, chg_pct, state.connected, state.trading_active,
-                  state.live_trading, state.auto_trade)
-
-    with main_ph.container():
+if True:
 
         # ── Row 1: Ticker metrics ─────────────────────────────────────────
         c1,c2,c3,c4,c5,c6 = st.columns(6)
@@ -1172,7 +1166,8 @@ while True:
         log_html += "</div>"
         st.markdown(log_html, unsafe_allow_html=True)
 
-        # Bottom padding
-        st.markdown("<div style='height:.5rem;'></div>", unsafe_allow_html=True)
+    # Bottom padding
+    st.markdown("<div style='height:.5rem;'></div>", unsafe_allow_html=True)
 
-    time.sleep(1)
+time.sleep(1)
+st.rerun()
