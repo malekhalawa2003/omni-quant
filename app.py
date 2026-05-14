@@ -585,10 +585,15 @@ def render_tv_chart(candles, symbol, timeframe, entry_price=None, entry_side=Non
 
     html = f"""<!DOCTYPE html><html><head>
 <script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
-<style>body{{margin:0;background:#0d1117;overflow:hidden;}}#c{{width:100%;height:{height}px;}}</style>
+<style>
+  html,body{{margin:0;padding:0;background:#0d1117;overflow:hidden;}}
+  #c{{position:absolute;top:0;left:0;right:0;bottom:0;}}
+</style>
 </head><body><div id="c"></div><script>
-const chart=LightweightCharts.createChart(document.getElementById('c'),{{
-  width:document.body.offsetWidth,height:{height},
+const el=document.getElementById('c');
+const chart=LightweightCharts.createChart(el,{{
+  autoSize:true,
+  height:{height},
   layout:{{background:{{type:'solid',color:'#0d1117'}},textColor:'#4a5568',
            fontFamily:'JetBrains Mono,monospace',fontSize:10}},
   grid:{{vertLines:{{color:'#161d27'}},horzLines:{{color:'#161d27'}}}},
@@ -614,7 +619,6 @@ candleSeries.setData({ohlcv_json});
 volSeries.setData({vol_json});
 {entry_js}
 chart.timeScale().fitContent();
-window.addEventListener('resize',()=>chart.applyOptions({{width:document.body.offsetWidth}}));
 </script></body></html>"""
 
     components.html(html, height=height + 10, scrolling=False)
