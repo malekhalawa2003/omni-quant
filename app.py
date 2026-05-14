@@ -678,7 +678,7 @@ def render_sidebar():
         st.divider()
 
         # Symbol / Timeframe
-        syms = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "ADAUSDT"]
+        syms = ["BTC-USDT", "ETH-USDT", "SOL-USDT", "DOGE-USDT", "OKB-USDT"]
         tfs  = ["1m", "5m", "15m", "1h"]
         sym  = st.selectbox("Symbol",    syms, index=syms.index(state.symbol) if state.symbol in syms else 0)
         tf   = st.selectbox("Timeframe", tfs,  index=tfs.index(state.timeframe) if state.timeframe in tfs else 0)
@@ -694,19 +694,23 @@ def render_sidebar():
         want_live = mode == "🔴 Live Exchange"
 
         if want_live:
-            api_key = st.text_input("API Key",    type="password",
-                                     value=st.session_state.get("api_key",""),
-                                     placeholder="Binance API Key")
-            api_sec = st.text_input("API Secret", type="password",
-                                     value=st.session_state.get("api_sec",""),
-                                     placeholder="Binance Secret")
-            testnet = st.checkbox("Use Testnet", value=True)
+            api_key  = st.text_input("API Key",    type="password",
+                                      value=st.session_state.get("api_key",""),
+                                      placeholder="OKX API Key")
+            api_sec  = st.text_input("API Secret", type="password",
+                                      value=st.session_state.get("api_sec",""),
+                                      placeholder="OKX Secret")
+            api_pass = st.text_input("Passphrase", type="password",
+                                      value=st.session_state.get("api_pass",""),
+                                      placeholder="OKX Passphrase")
+            testnet = st.checkbox("Use Demo Account", value=True)
             c1, c2  = st.columns(2)
             with c1:
                 if st.button("Connect", use_container_width=True, type="primary"):
-                    st.session_state.api_key = api_key
-                    st.session_state.api_sec = api_sec
-                    ok = exchange.connect(api_key, api_sec, testnet)
+                    st.session_state.api_key  = api_key
+                    st.session_state.api_sec  = api_sec
+                    st.session_state.api_pass = api_pass
+                    ok = exchange.connect(api_key, api_sec, api_pass, testnet)
                     if ok:
                         with state.acquire():
                             state.live_trading = True

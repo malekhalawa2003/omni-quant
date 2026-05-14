@@ -7,24 +7,29 @@ import websockets
 
 from .shared_state import Candle, state
 
-_BINANCE_WS = "wss://stream.binance.com:9443/stream"
+_OKX_WS = "wss://ws.okx.com:8443/ws/v5/public"
+
+_TF_MAP = {
+    "1m":  "candle1m",
+    "5m":  "candle5m",
+    "15m": "candle15m",
+    "1h":  "candle1H",
+}
 
 
-class BinanceDataFeed:
+class OKXDataFeed:
     def __init__(self):
         self._loop: asyncio.AbstractEventLoop = None
         self._thread: threading.Thread = None
         self._running = False
         self._backoff = 3
 
-    # ── Public API ────────────────────────────────────────────────────────
-
     def start(self):
         if self._thread and self._thread.is_alive():
             return
         self._running = True
         self._thread = threading.Thread(
-            target=self._run_loop, daemon=True, name="BinanceFeed"
+            target=self._run_loop, daemon=True, name="OKXFeed"
         )
         self._thread.start()
 
@@ -43,8 +48,6 @@ class BinanceDataFeed:
         time.sleep(0.3)
         self.start()
 
-    # ── Internal ──────────────────────────────────────────────────────────
-
     def _run_loop(self):
         self._loop = asyncio.new_event_loop()
         asyncio.set_event_loop(self._loop)
@@ -58,28 +61,37 @@ class BinanceDataFeed:
 
     async def _connect(self):
         while self._running:
-            sym = state.symbol.lower()
-            tf  = state.timeframe
-            streams = (
-                f"{sym}@kline_{tf}"
-                f"/{sym}@bookTicker"
-                f"/{sym}@miniTicker"
-                f"/{sym}@depth5@100ms"
-            )
-            url = f"{_BINANCE_WS}?streams={streams}"
+            inst_id = state.symbol
+            tf_key  = _TF_MAP.get(state.timeframe, "candle1m")
+
+            sub = json.dumps({
+                "op": "subscribe",
+                "args": [
+                    {"channel": tf_key,    "instId": inst_id},
+                    {"channel": "tickers", "instId": inst_id},
+                    {"channel": "books5",  "instId": inst_id},
+                ],
+            })
 
             try:
                 async with websockets.connect(
-                    url, ping_interval=20, ping_timeout=10
+                    _OKX_WS, ping_interval=None, close_timeout=5
                 ) as ws:
+                    await ws.send(sub)
                     with state.acquire():
                         state.connected = True
-                    state.add_log("INFO", f"Connected: {sym.upper()} {tf}")
+                    state.add_log("INFO", f"OKX connected: {inst_id} {state.timeframe}")
                     self._backoff = 3
+                    last_ping = time.time()
 
                     async for raw in ws:
                         if not self._running:
                             break
+                        if raw == "pong":
+                            continue
+                        if time.time() - last_ping > 25:
+                            await ws.send("ping")
+                            last_ping = time.time()
                         try:
                             self._process(json.loads(raw))
                         except Exception:
@@ -96,45 +108,53 @@ class BinanceDataFeed:
                 self._backoff = min(self._backoff * 2, 30)
 
     def _process(self, msg: dict):
-        stream = msg.get("stream", "")
-        data   = msg.get("data", {})
+        if "event" in msg:
+            if msg.get("event") == "error":
+                state.add_log("ERROR", f"OKX WS: {msg.get('msg', '')}")
+            return
 
-        if "@kline" in stream:
-            k = data["k"]
-            state.update_candle(Candle(
-                time=k["t"] // 1000,
-                open=float(k["o"]),
-                high=float(k["h"]),
-                low=float(k["l"]),
-                close=float(k["c"]),
-                volume=float(k["v"]),
-                is_closed=k["x"],
-            ))
+        ch   = msg.get("arg", {}).get("channel", "")
+        data = msg.get("data", [])
+        if not data:
+            return
 
-        elif "@bookTicker" in stream:
+        if ch.startswith("candle"):
+            # [ts_ms, open, high, low, close, vol, volCcy, volCcyQuote, confirm]
+            for row in data:
+                state.update_candle(Candle(
+                    time=int(row[0]) // 1000,
+                    open=float(row[1]),
+                    high=float(row[2]),
+                    low=float(row[3]),
+                    close=float(row[4]),
+                    volume=float(row[5]),
+                    is_closed=(row[8] == "1"),
+                ))
+
+        elif ch == "tickers":
+            d        = data[0]
+            price    = float(d.get("last", 0) or 0)
+            open_24h = float(d.get("open24h", price) or price)
+            chg_pct  = ((price - open_24h) / open_24h * 100) if open_24h else 0.0
             with state.acquire():
-                state.ticker["bid"] = float(data["b"])
-                state.ticker["ask"] = float(data["a"])
-                state.ticker["price"] = (
-                    state.ticker["bid"] + state.ticker["ask"]
-                ) / 2
-                state.ticker["last_update"] = time.time()
+                state.ticker["price"]            = price
+                state.ticker["bid"]              = float(d.get("bidPx", 0) or 0)
+                state.ticker["ask"]              = float(d.get("askPx", 0) or 0)
+                state.ticker["high_24h"]         = float(d.get("high24h", 0) or 0)
+                state.ticker["low_24h"]          = float(d.get("low24h", 0) or 0)
+                state.ticker["volume_24h"]       = float(d.get("volCcy24h", 0) or 0)
+                state.ticker["price_change_pct"] = round(chg_pct, 4)
+                state.ticker["last_update"]      = time.time()
 
-        elif "@miniTicker" in stream:
-            with state.acquire():
-                state.ticker["high_24h"]          = float(data["h"])
-                state.ticker["low_24h"]           = float(data["l"])
-                state.ticker["volume_24h"]        = float(data["v"])
-                state.ticker["price_change_pct"]  = float(data["P"])
-
-        elif "@depth5" in stream:
+        elif ch == "books5":
+            d = data[0]
             with state.acquire():
                 state.orderbook["bids"] = [
-                    [float(p), float(q)] for p, q in data.get("bids", [])
+                    [float(b[0]), float(b[1])] for b in d.get("bids", [])
                 ]
                 state.orderbook["asks"] = [
-                    [float(p), float(q)] for p, q in data.get("asks", [])
+                    [float(a[0]), float(a[1])] for a in d.get("asks", [])
                 ]
 
 
-feed = BinanceDataFeed()
+feed = OKXDataFeed()

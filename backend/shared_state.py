@@ -24,7 +24,7 @@ class SharedState:
         # Market data
         self._candles: Dict[str, deque] = {}
         self.ticker = {
-            "symbol": "BTCUSDT",
+            "symbol": "BTC-USDT",
             "price": 0.0,
             "bid": 0.0,
             "ask": 0.0,
@@ -38,7 +38,7 @@ class SharedState:
 
         # Connection
         self.connected = False
-        self.symbol = "BTCUSDT"
+        self.symbol = "BTC-USDT"
         self.timeframe = "1m"
 
         # ── Trading mode ──────────────────────────────────────────────────
