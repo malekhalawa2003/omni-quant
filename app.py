@@ -884,6 +884,7 @@ render_header(price, chg_pct, state.connected, state.trading_active,
               state.live_trading, state.auto_trade)
 
 if True:
+    if True:
 
         # ── Row 1: Ticker metrics ─────────────────────────────────────────
         c1,c2,c3,c4,c5,c6 = st.columns(6)
