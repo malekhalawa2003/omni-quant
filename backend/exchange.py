@@ -43,10 +43,10 @@ class ExchangeClient:
                 "options":  {"defaultType": "swap"},
                 "enableRateLimit": True,
             }
-            if is_demo:
-                params["options"]["sandboxMode"] = True
 
             client = ccxt.okx(params)
+            if is_demo:
+                client.set_sandbox_mode(True)
             balance = client.fetch_balance()
 
             with self._lock:

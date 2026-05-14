@@ -1,3 +1,4 @@
+import json
 import time
 from datetime import datetime
 
@@ -5,7 +6,7 @@ import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
-from plotly.subplots import make_subplots
+import streamlit.components.v1 as components
 
 from backend.auto_trader import auto_trader
 from backend.data_feed import feed
@@ -550,80 +551,73 @@ _BG   = "#0d1117"
 _GRID = "#161d27"
 
 
-def build_chart(candles) -> go.Figure:
+def render_tv_chart(candles, symbol, timeframe, entry_price=None, entry_side=None):
+    height = 440
     if not candles:
-        fig = go.Figure()
-        fig.add_annotation(
-            text="⏳ Connecting to Binance…",
-            xref="paper", yref="paper", x=0.5, y=0.5,
-            showarrow=False,
-            font=dict(color="#30363d", size=16, family="Inter"),
+        components.html(
+            f'<div style="height:{height}px;display:flex;align-items:center;'
+            f'justify-content:center;background:#0d1117;border-radius:10px;'
+            f'border:1px solid #161d27;">'
+            f'<div style="color:#30363d;font-size:14px;font-family:\'JetBrains Mono\',monospace;">'
+            f'Connecting to OKX...</div></div>',
+            height=height + 10, scrolling=False,
         )
-        fig.update_layout(
-            paper_bgcolor=_BG, plot_bgcolor=_BG,
-            height=430, margin=dict(l=0, r=50, t=0, b=0),
-        )
-        return fig
+        return
 
-    df = pd.DataFrame([{
-        "t": pd.Timestamp(c.time, unit="s", tz="UTC"),
-        "o": c.open, "h": c.high, "l": c.low, "c": c.close, "v": c.volume,
-    } for c in candles])
+    ohlcv_json = json.dumps([
+        {"time": c.time, "open": c.open, "high": c.high, "low": c.low, "close": c.close}
+        for c in candles
+    ])
+    vol_json = json.dumps([
+        {"time": c.time, "value": c.volume,
+         "color": "#089981" if c.close >= c.open else "#f23645"}
+        for c in candles
+    ])
 
-    up   = "#089981"   # TradingView green
-    down = "#f23645"   # TradingView red
-    bar_colors = [up if r.c >= r.o else down for _, r in df.iterrows()]
-
-    fig = make_subplots(
-        rows=2, cols=1, shared_xaxes=True,
-        vertical_spacing=0.015, row_heights=[0.72, 0.28],
-    )
-
-    fig.add_trace(go.Candlestick(
-        x=df["t"], open=df["o"], high=df["h"], low=df["l"], close=df["c"],
-        increasing=dict(line_color=up,   fillcolor=up),
-        decreasing=dict(line_color=down, fillcolor=down),
-        line_width=1,
-        name=state.symbol,
-    ), row=1, col=1)
-
-    fig.add_trace(go.Bar(
-        x=df["t"], y=df["v"], marker_color=bar_colors,
-        marker_opacity=0.5, name="Volume",
-    ), row=2, col=1)
-
-    # Entry line
-    with state.acquire():
-        pos = dict(state.position)
-    if pos["side"] and pos["entry_price"] > 0:
-        col_line = up if pos["side"] == "long" else down
-        fig.add_hline(
-            y=pos["entry_price"], row=1, col=1,
-            line=dict(color="#d29922", dash="dot", width=1.5),
-            annotation_text=f"  Entry ${pos['entry_price']:,.2f}",
-            annotation_font=dict(color="#d29922", size=11, family="JetBrains Mono"),
-            annotation_position="right",
+    entry_js = ""
+    if entry_price and entry_price > 0 and entry_side:
+        entry_js = (
+            f"candleSeries.createPriceLine({{"
+            f"price:{entry_price},color:'#d29922',lineWidth:1,lineStyle:1,"
+            f"axisLabelVisible:true,title:'Entry ${entry_price:,.2f}'"
+            f"}});"
         )
 
-    ax = dict(
-        gridcolor=_GRID, gridwidth=1, showgrid=True,
-        tickfont=dict(color="#30363d", size=10, family="JetBrains Mono"),
-        zeroline=False, showline=False,
-    )
-    fig.update_layout(
-        paper_bgcolor=_BG, plot_bgcolor=_BG,
-        font=dict(family="Inter", color="#8b949e"),
-        xaxis_rangeslider_visible=False,
-        height=430, margin=dict(l=0, r=60, t=8, b=0),
-        showlegend=False,
-        yaxis={**ax, "side": "right", "tickformat": ",.2f"},
-        yaxis2={**ax, "side": "right", "tickformat": ",.0f"},
-        xaxis=ax, xaxis2=ax,
-        hovermode="x unified",
-        hoverlabel=dict(bgcolor="#161d27", bordercolor="#21262d",
-                         font=dict(family="JetBrains Mono", size=11)),
-    )
-    return fig
+    html = f"""<!DOCTYPE html><html><head>
+<script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
+<style>body{{margin:0;background:#0d1117;overflow:hidden;}}#c{{width:100%;height:{height}px;}}</style>
+</head><body><div id="c"></div><script>
+const chart=LightweightCharts.createChart(document.getElementById('c'),{{
+  width:document.body.offsetWidth,height:{height},
+  layout:{{background:{{type:'solid',color:'#0d1117'}},textColor:'#4a5568',
+           fontFamily:'JetBrains Mono,monospace',fontSize:10}},
+  grid:{{vertLines:{{color:'#161d27'}},horzLines:{{color:'#161d27'}}}},
+  crosshair:{{mode:LightweightCharts.CrosshairMode.Normal,
+    vertLine:{{color:'#30363d',width:1,style:1}},
+    horzLine:{{color:'#30363d',width:1,style:1}}}},
+  rightPriceScale:{{borderColor:'#161d27',textColor:'#30363d'}},
+  timeScale:{{borderColor:'#161d27',timeVisible:true,secondsVisible:false}},
+  watermark:{{visible:true,fontSize:13,horzAlign:'left',vertAlign:'top',
+              color:'rgba(255,255,255,0.04)',text:'{symbol} · {timeframe}'}},
+}});
+const candleSeries=chart.addCandlestickSeries({{
+  upColor:'#089981',downColor:'#f23645',
+  borderUpColor:'#089981',borderDownColor:'#f23645',
+  wickUpColor:'#089981',wickDownColor:'#f23645',
+}});
+const volSeries=chart.addHistogramSeries({{
+  priceFormat:{{type:'volume'}},priceScaleId:'vol',
+  scaleMargins:{{top:0.8,bottom:0}},
+}});
+chart.priceScale('vol').applyOptions({{scaleMargins:{{top:0.8,bottom:0}}}});
+candleSeries.setData({ohlcv_json});
+volSeries.setData({vol_json});
+{entry_js}
+chart.timeScale().fitContent();
+window.addEventListener('resize',()=>chart.applyOptions({{width:document.body.offsetWidth}}));
+</script></body></html>"""
+
+    components.html(html, height=height + 10, scrolling=False)
 
 
 def build_depth_chart(bids, asks) -> go.Figure | None:
@@ -916,11 +910,14 @@ if True:
         chart_col, sig_col = st.columns([3, 1], gap="small")
 
         with chart_col:
-            st.plotly_chart(
-                build_chart(state.get_candles(200)),
-                use_container_width=True,
-                config={"displayModeBar": False},
-                key="candle_chart",
+            with state.acquire():
+                _pos_snap = dict(state.position)
+            render_tv_chart(
+                state.get_candles(200),
+                state.symbol,
+                state.timeframe,
+                _pos_snap["entry_price"] if _pos_snap["side"] else None,
+                _pos_snap["side"],
             )
 
         with sig_col:
